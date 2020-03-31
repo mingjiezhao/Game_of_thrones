@@ -1,0 +1,323 @@
+---
+title: "NLP Analysis for Game of Thones"
+author: "Mingjie Zhao"
+date: "Mar. 20, 2020"
+output: pdf_document
+fontsize: 11pt
+---
+
+```{r setup, message = FALSE, echo=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(jsonlite)
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(wordcloud)
+library(tidytext)
+library(reshape2)
+library(tm)
+library(SnowballC)
+library(topicmodels)
+library(gridExtra)
+```
+# 1. Introduction
+Many people around me are fans of Game of Thrones, and last summer I heard a lot of complaints about the show's ending. For whatever reason, my brain has had difficulty memorizing character names, especially when the relationships of characters are complicated. So I gave up watching the show after a few episodes. However, I think it would be very interesting to analyze the words of the characters. The show creates a fantastic world and I am curious to learn about the world through the characters's words (much faster than watching the whole show which includes 73 episodes), and that's the motiviation of this project.
+
+# 2. Methodology
+In this project, I picked four characters with the most lines. You may be wondering by now about who are the most talkative ones in this show. Well, the answer will be provided below in the analysis. Since characters may speak around certain topics based on their character settings, I created LDA (Latent Dirichlet Allocation) models of these 4 characters to see if there are main topics from what they said. I also performed sentiment analysis on their words to see how they feel about by living in the fantastic world. Data visualizations are created by multiple plots and some findings are provided at the end of the project.
+
+# 3. Anslysis
+## 1) Data preprocessing
+Firstly, read in (a) dataset which was found on Github (json file provided by https://github.com/jeffreylancaster/game-of-thrones). The original dataset is a huge list of list and I manipulated the dataset to get a list of the characters and a new dataframe to count for numbers of sentence for each character. We can see that the average number of sentences in the show across all the characters is 181.5, while the most talktaive character said 1704 sentences. However, there are a lot of characters who only said one sentence in the show. And the 4 characters who are on my list of top 4 talktive ones are Tyrion Lannister, Jon Snow, Daenerys Targaryen and Cersei Lannister. I hope this is not a surprising result to you if you are a fan, because what they've said would be very important here in my analysis below.
+```{r,echo=FALSE, warning=FALSE}
+all_words = fromJSON("script-bag-of-words.json", flatten = TRUE)
+all_text = all_words$text  #73 episode
+
+
+roles = list()  # 817 character
+words_lst= list()  #817 list of words for each character
+
+for(i in 1:length(all_text)){  #73
+  # aa=i
+  aa=all_text[i]
+  for(j in 1:length(aa[[1]]$name ) ){
+    name = aa[[1]]$name[j]
+    # create name list
+    if(!(name %in% roles)){
+      roles = append(roles, name)
+      words_lst[[length(words_lst)+1]] = list()
+      index = length(words_lst)
+    } else{
+      index = match(name, roles)
+    }
+    # create words list
+    words_lst[[index]] = append(words_lst[[index]],aa[[1]]$text[j])
+    
+  }
+  
+}
+
+
+len_lst = lengths(words_lst)
+# create a dataframe of length of word and counts
+aa = len_lst %>% as.data.frame() %>% group_by(lengths(words_lst)) %>% summarise(count=n()) 
+names(aa)[1]="word_length"
+# sort by the length of word
+aa = aa %>% arrange(desc(word_length))
+
+```
+
+## 2) Word frequency analysis
+To deal with the text data, I created a function to do data manipulation including removing punctuation, numbers and stopwords. I also did word stemming to remove affixes. Then I created a chart to show which words are used the most by these characters. It's interesting to see that these top words are highly correlated with each character's background. For example, Tyrion used "king" and "father" a lot, because he spent a lot of court business dealing with nobles. Also Tyrion lived in the shadow of his father Tywin Lannister for a long time, until he killed his own father. Daenerys liked to say "dragon" and "people", since she is the mother of three dragons, and is considered to be the "Mother of dragons". And  Cersei was the ruling queen of the seven kingdoms, until losing it to Dany. She married King Robert, and is mother of two kings. That may explain her favorite words like "king", "father" and "love".
+```{r,echo=FALSE, message = FALSE,warning=FALSE}
+# words of Tyrion Lannister
+tl1 = words_lst[[match(aa[1,"word_length"],len_lst)]] 
+
+# words of Jon Snow
+js2 = words_lst[[match(aa[2,"word_length"],len_lst)]] 
+
+# words of Daenerys Targaryen
+dt3 = words_lst[[match(aa[3,"word_length"],len_lst)]] 
+
+# words of Cersei Lannister
+cl4 = words_lst[[match(aa[4,"word_length"],len_lst)]] 
+
+
+# create a function 
+topword = function(temp,name){
+text  = unlist(temp, use.names=FALSE)
+lines = tibble(line = 1:length(temp), text = text)
+
+myCorpus = Corpus(VectorSource(lines$text))
+myCorpus = tm_map(myCorpus, content_transformer(tolower))
+# remove punctuation
+myCorpus = tm_map(myCorpus, removePunctuation) 
+# remove numbers
+myCorpus = tm_map(myCorpus, removeNumbers)
+
+# add  extra stop words
+myStopwords = c(stopwords("english"), "available", "via", "your","will","im","fuck","pleas","whore","cock","shit","stark")
+# remove 'r' and 'big' from stopwords
+myStopwords = setdiff(myStopwords, c("r", "big"))
+# remove stopwords from corpus
+myCorpus = tm_map(myCorpus, removeWords, myStopwords)
+
+#???# keep a copy of corpus to use later as a dictionary for stem
+# completion
+myCorpusCopy = myCorpus
+# stem words
+myCorpus = tm_map(myCorpus, stemDocument)
+myCorpus = tm_map(myCorpus, removeWords, myStopwords)
+
+content = myCorpus$content
+lines = tibble(line = 1:length(myCorpus), text = content)
+
+tdm = TermDocumentMatrix(myCorpus, control = list(wordLengths = c(1, Inf)))
+
+
+## Freqency words and Association
+idx = which(dimnames(tdm)$Terms == "r")
+
+term.freq = rowSums(as.matrix(tdm)) %>% as.data.frame()
+
+df = data.frame(term = rownames(term.freq), freq = term.freq)
+names(df) = c("term","freq")
+df = df %>% arrange(desc(freq)) %>%  top_n(10)
+
+dtm = as.DocumentTermMatrix(tdm)
+
+rowTotals = apply(dtm , 1, sum) #Find the sum of words in each Document
+dtm.new   = dtm[rowTotals> 0, ]           #remove all docs without words
+
+
+# draw top chart plots
+p1 = ggplot(df, aes(x=reorder(term,freq), y=freq, fill=freq)) + geom_bar(stat = "identity") + xlab("Words") + ylab("Count") +coord_flip()+ ggtitle(paste(name,": ten most frequent words",""))
+return(list(plot=p1,dtm.new=dtm.new, lines=lines))
+}
+
+# Tyrion Lannister, Jon Snow, Daenerys Targaryen and Cersei Lannister
+
+p1=topword(tl1,"Tyrion")$plot
+p2=topword(js2,"Jon")$plot
+p3=topword(dt3,"Daenerys")$plot
+p4=topword(cl4,"Cersei")$plot
+
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+
+```
+
+## 3) LDA and topic model
+Latent Dirichlet Allocation (LDA) is a widely used model in natural language processing (NLP) as an unsupervised learning method. In this project, I am trying to find 3 topics for each character. A function was written to perform the LDA modeling and a chart was plotted for the top 4 words in the 3 topics, to visualize the results and understand the topics that were extracted from these words.
+
+It's interesting to see that some of the topics correlate closely with the show. For example, the third topic of Jon includes key words like "wall", "night" and "watch". This probably correlates with the story that Jon has served in the Night Watch, first as a personal steward of the then Lord Commander, and then became a Lord Commander of the Night Watch himself. The main duty of the Night Watch is to guard the Wall. Also, keywords in Topic 3 include other languages spoken by Dany, as she is ruling many people of different cultures and races. Another good example is the Topic 2 of Cersei include keywords like "love"", "brother", and "daughter", while Cersei has a relationship and affair with her twin brother Jaime Lannister.
+```{r,echo=FALSE, message = FALSE,warning=FALSE}
+
+g_lda = function(dtm.new,name){
+
+lda = LDA(dtm.new, k = 3,control = list(seed = 1234)) # find 3 topics
+term = terms(lda, 4) # first 4 terms of every topic
+print(paste(name,"term"))
+print(term)
+
+
+# Word-topic probabilities
+topics = tidy(lda, matrix = "beta")
+df_top_terms = topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+
+# plot
+p2=df_top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() + ggtitle(paste(name,': Top terms in each LDA topic'))
+
+return(p2)
+}
+
+# Tyrion Lannister
+dtm1 = topword(tl1,"Tyrion")$dtm.new
+df_top_terms1 =g_lda(dtm1, "Tyrion")
+# df_top_terms1
+# Jon Snow
+dtm2 = topword(js2,"Jon")$dtm.new
+df_top_terms2 =g_lda(dtm2, "Jon")
+# df_top_terms2
+# Daenerys Targaryen 
+dtm3 = topword(dt3,"Daenerys")$dtm.new
+df_top_terms3 =g_lda(dtm3, "Daenerys")
+# df_top_terms3
+# Cersei Lannister
+dtm4 = topword(cl4,"Cersei")$dtm.new
+df_top_terms4 =g_lda(dtm4, "Cersei")
+# df_top_terms4
+
+grid.arrange(df_top_terms1, df_top_terms2, nrow = 2)
+grid.arrange(df_top_terms3, df_top_terms4, nrow = 2)
+```
+
+## 4) Sentiment analysis
+
+It is also insightful to perform setiment analysis to check emotions within the lines. Two plots were made for each character. The first plot shows the top words contributing the most to positive and negative emotions, and the second plot shows the top 15 emotional words that contribute to sentiment. It is interesting to see that the word "love" is the top positive word appearred in the analysis results for all 4 characters. Additionally, it is worth noticing that in the second plot (Contribution to sentiment) for all four main characters, there are more negtive words contributing to sentiment than positive words, indicating a negative attitude in lines for the four characters.
+```{r,echo=FALSE,message = FALSE, fig.align='center', warning=FALSE}
+# create a function for negative and positive words
+senti = function(lines, name){
+tidy_lines = lines %>%
+  unnest_tokens(word, text) %>%
+  anti_join(stop_words)
+
+bing_word_counts = tidy_lines %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  ungroup()
+
+p3 = bing_word_counts %>%
+  group_by(sentiment) %>%
+  top_n(10) %>%
+  ungroup() %>%
+  mutate(word = reorder(word, n)) %>%
+  ggplot(aes(word, n, fill = sentiment)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~sentiment, scales = "free") +
+  labs(y = " ", x = NULL) +
+  coord_flip() + 
+  ggtitle(paste(name, ': words contributions'))
+
+contributions = tidy_lines %>%
+  inner_join(get_sentiments("afinn"), by = "word") %>%
+  group_by(word) %>%
+  summarize(occurences = n(),
+            contribution = sum(score))
+p4 = contributions %>%
+  top_n(15, abs(contribution)) %>%
+  mutate(word = reorder(word, contribution)) %>%
+  ggplot(aes(word, contribution, fill = contribution > 0)) +
+  # ggtitle(paste(name,': words contributions')) +
+  labs(y = "Contribution to sentiment", x = NULL) +
+  geom_col(show.legend = FALSE) +
+  coord_flip()
+
+p5 = tidy_lines 
+
+return(list(p3=p3, p4=p4, p5=p5))
+}
+
+# Tyrion Lannister
+lines1 = topword(tl1,"Tyrion")$lines
+# senti(lines1, "Tyrion")$p3
+# senti(lines1, "Tyrion")$p4
+grid.arrange(senti(lines1, "Tyrion")$p3, senti(lines1, "Tyrion")$p4, nrow = 2)
+# Jon Snow
+lines2 = topword(js2,"Jon")$lines
+# senti(lines2, "Jon")$p3
+# senti(lines2, "Jon")$p4
+grid.arrange(senti(lines2, "Jon")$p3, senti(lines2, "Jon")$p4, nrow = 2)
+# Daenerys Targaryen 
+lines3 = topword(dt3,"Daenerys")$lines
+# senti(lines3, "Daenerys")$p3
+# senti(lines3, "Daenerys")$p4
+grid.arrange(senti(lines3, "Daenerys")$p3, senti(lines3, "Daenerys")$p4, nrow = 2)
+
+# Cersei Lannister
+lines4 = topword(cl4,"Cersei")$lines
+# senti(lines4, "Cersei")$p3
+# senti(lines4, "Cersei")$p4
+grid.arrange(senti(lines4, "Cersei")$p3, senti(lines4, "Cersei")$p4, nrow = 2)
+
+
+# grid.arrange(senti(lines1, "Tyrion")$p3, senti(lines2, "Jon")$p3, nrow = 1)
+# grid.arrange(senti(lines3, "Daenerys")$p3, senti(lines4, "Cersei")$p3, nrow = 1)
+```
+
+
+## 5) Word cloud
+Last but not least, I created a word cloud for each character to visualize the emotional words in lines. We can see that on the negative side, "kill" and "die" are really eyes-catching, while "love" and "grace" pop up in the positive side.
+```{r,echo=FALSE, message = FALSE,warning=FALSE, out.width="70%", fig.align='center',out.height="110%"}
+# function to create a word cloud
+cloud = function(tidy_lines){
+## commend this cloud because the next one looks better!
+# tidy_lines %>%
+#   # anti_join(stop_words) %>%
+#   count(word) %>%
+#   with(wordcloud(word, n, max.words = 100))
+
+  tidy_lines %>%
+  inner_join(get_sentiments("bing")) %>%
+  count(word, sentiment, sort = TRUE) %>%
+  acast(word ~ sentiment, value.var = "n", fill = 0) %>%
+  comparison.cloud(colors = c("gray20", "gray80"),
+                   max.words = 50)
+}
+
+tidy_lines1 = senti(lines1, "Tyrion")$p5
+cloud(tidy_lines1)
+
+
+
+
+```
+Jon Snow
+```{r,echo=FALSE, message = FALSE,warning=FALSE, out.width="70%", fig.align='center',out.height="110%"}
+tidy_lines2 = senti(lines2, "Jon")$p5
+cloud(tidy_lines2)
+```
+Daenerys Targaryen
+```{r,echo=FALSE, message = FALSE,warning=FALSE, out.width="70%", fig.align='center',out.height="110%"}
+tidy_lines3 = senti(lines3, "Daenerys")$p5
+cloud(tidy_lines3)
+
+```
+Cersei Lannister
+```{r,echo=FALSE, message = FALSE,warning=FALSE, out.width="70%", fig.align='center',out.height="110%"}
+tidy_lines4 =senti(lines4, "Cersei")$p5
+cloud(tidy_lines4)
+```
+# 3. Conclusions
+In this project, I used 5 ways to analyze the lines from Game of Thrones with NLP techniques. As a summary the LDA and topic model do a good job in terms of representing the stories of each character. The sentiment analyses provide insights about the emotions of these characters. It is interesting to see that most of the results correspond to the background of the chatacters. This show mostly provides the audience with negative emotions, but I am happy to see that love is the most used positive word.
+
+# Reference
+Julia Silge and David Robinson,"Text Mining with R"
