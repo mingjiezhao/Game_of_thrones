@@ -10,6 +10,5 @@ LDA (Latent Dirichlet Allocation) models are performed to see if there are some 
 
 *References:*
 
-*https://www.tidytextmining.com/
-https://medium.com/swiftworld/topic-modeling-of-new-york-times-articles-11688837d32f
-*
+*https://www.tidytextmining.com/*
+*https://medium.com/swiftworld/topic-modeling-of-new-york-times-articles-11688837d32f*
